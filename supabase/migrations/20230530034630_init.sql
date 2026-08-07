@@ -1,4 +1,4 @@
-/** 
+/**
 * USERS
 * Note: This table contains user data. Users should only be able to view and update their own data.
 */
@@ -7,6 +7,8 @@ create table users (
   id uuid references auth.users not null primary key,
   full_name text,
   avatar_url text,
+  -- Role assigned to the user ('user' or 'admin')
+  role text default 'user' check (role in ('user', 'admin')),
   -- The customer's billing address, stored in JSON format.
   billing_address jsonb,
   -- Stores your customer's payment instruments.
@@ -18,12 +20,17 @@ create policy "Can update own user data." on users for update using (auth.uid() 
 
 /**
 * This trigger automatically creates a user entry when a new user signs up via Supabase Auth.
-*/ 
-create function public.handle_new_user() 
+*/
+create function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.users (id, full_name, avatar_url)
-  values (new.id, new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'avatar_url');
+  insert into public.users (id, full_name, avatar_url, role)
+  values (
+    new.id, 
+    new.raw_user_meta_data->>'full_name', 
+    new.raw_user_meta_data->>'avatar_url',
+    coalesce(new.raw_user_meta_data->>'role', 'user')
+  );
   return new;
 end;
 $$ language plpgsql security definer;
@@ -44,7 +51,7 @@ create table customers (
 alter table customers enable row level security;
 -- No policies as this is a private table that the user must not have access to.
 
-/** 
+/**
 * PRODUCTS
 * Note: products are created and managed in Stripe and synced to our DB via Stripe webhooks.
 */
@@ -75,7 +82,7 @@ create table prices (
   -- Price ID from Stripe, e.g. price_1234.
   id text primary key,
   -- The ID of the prduct that this price belongs to.
-  product_id text references products, 
+  product_id text references products,
   -- Whether the price can be used for new purchases.
   active boolean,
   -- A brief description of the price.
@@ -138,8 +145,8 @@ alter table subscriptions enable row level security;
 create policy "Can only view own subs data." on subscriptions for select using (auth.uid() = user_id);
 
 /**
- * REALTIME SUBSCRIPTIONS
- * Only allow realtime listening on public tables.
- */
+* REALTIME SUBSCRIPTIONS
+* Only allow realtime listening on public tables.
+*/
 drop publication if exists supabase_realtime;
 create publication supabase_realtime for table products, prices;

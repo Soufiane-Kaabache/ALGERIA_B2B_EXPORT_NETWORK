@@ -1,14 +1,17 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { cache } from 'react';
+import type { Database } from '@/types_db';
 
-export const getUser = cache(async (supabase: SupabaseClient) => {
+type SupabasePublicClient = SupabaseClient<Database, 'public', Database['public']>;
+
+export const getUser = cache(async (supabase: SupabasePublicClient) => {
   const {
     data: { user }
   } = await supabase.auth.getUser();
   return user;
 });
 
-export const getSubscription = cache(async (supabase: SupabaseClient) => {
+export const getSubscription = cache(async (supabase: SupabasePublicClient) => {
   const { data: subscription, error } = await supabase
     .from('subscriptions')
     .select('*, prices(*, products(*))')
@@ -18,7 +21,7 @@ export const getSubscription = cache(async (supabase: SupabaseClient) => {
   return subscription;
 });
 
-export const getProducts = cache(async (supabase: SupabaseClient) => {
+export const getProducts = cache(async (supabase: SupabasePublicClient) => {
   const { data: products, error } = await supabase
     .from('products')
     .select('*, prices(*)')
@@ -30,10 +33,17 @@ export const getProducts = cache(async (supabase: SupabaseClient) => {
   return products;
 });
 
-export const getUserDetails = cache(async (supabase: SupabaseClient) => {
-  const { data: userDetails } = await supabase
-    .from('users')
-    .select('*')
-    .single();
-  return userDetails;
+export const getUserDetails = cache(async (supabase: SupabasePublicClient) => {
+  const { data: profile } = await supabase
+    .from('user_profiles')
+    .select('first_name, last_name')
+    .maybeSingle();
+
+  if (!profile) {
+    return null;
+  }
+
+  return {
+    full_name: `${profile.first_name} ${profile.last_name}`.trim()
+  };
 });
