@@ -11,7 +11,11 @@ import {
 } from '@/utils/helpers';
 import { Tables } from '@/types_db';
 
-type Price = Tables<'prices'>;
+type Price = {
+  id: string;
+  type: 'recurring' | 'one_time';
+  trial_period_days: number | null;
+};
 
 type CheckoutResponse = {
   errorRedirect?: string;

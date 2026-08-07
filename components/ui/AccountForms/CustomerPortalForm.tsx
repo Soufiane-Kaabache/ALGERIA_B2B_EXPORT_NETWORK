@@ -9,19 +9,9 @@ import Card from '@/components/ui/Card';
 import { Tables } from '@/types_db';
 
 type Subscription = Tables<'subscriptions'>;
-type Price = Tables<'prices'>;
-type Product = Tables<'products'>;
-
-type SubscriptionWithPriceAndProduct = Subscription & {
-  prices:
-    | (Price & {
-        products: Product | null;
-      })
-    | null;
-};
 
 interface Props {
-  subscription: SubscriptionWithPriceAndProduct | null;
+  subscription: Subscription | null;
 }
 
 export default function CustomerPortalForm({ subscription }: Props) {
@@ -29,13 +19,13 @@ export default function CustomerPortalForm({ subscription }: Props) {
   const currentPath = usePathname();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const subscriptionPrice =
+  const subscriptionAmount =
     subscription &&
-    new Intl.NumberFormat('en-US', {
+    new Intl.NumberFormat('fr-FR', {
       style: 'currency',
-      currency: subscription?.prices?.currency!,
+      currency: 'DZD',
       minimumFractionDigits: 0
-    }).format((subscription?.prices?.unit_amount || 0) / 100);
+    }).format(subscription.amount_paid || 0);
 
   const handleStripePortalRequest = async () => {
     setIsSubmitting(true);
@@ -49,7 +39,7 @@ export default function CustomerPortalForm({ subscription }: Props) {
       title="Your Plan"
       description={
         subscription
-          ? `You are currently on the ${subscription?.prices?.products?.name} plan.`
+          ? `You are currently on the ${subscription.plan} plan.`
           : 'You are not currently subscribed to any plan.'
       }
       footer={
@@ -67,7 +57,7 @@ export default function CustomerPortalForm({ subscription }: Props) {
     >
       <div className="mt-8 mb-4 text-xl font-semibold">
         {subscription ? (
-          `${subscriptionPrice}/${subscription?.prices?.interval}`
+          subscriptionAmount
         ) : (
           <Link href="/">Choose your plan</Link>
         )}

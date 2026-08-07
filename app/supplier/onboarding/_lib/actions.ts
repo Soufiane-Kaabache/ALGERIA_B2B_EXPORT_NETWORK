@@ -82,7 +82,7 @@ export async function saveDraft(_prev: ActionState, formData: FormData): Promise
     }
   }
 
-  const payload: BusinessInsert = {
+  const payload: BusinessUpdate = {
     trade_name: d.trade_name.trim(),
     legal_name: d.legal_name.trim(),
     legal_form: d.legal_form,
@@ -110,7 +110,7 @@ export async function saveDraft(_prev: ActionState, formData: FormData): Promise
 
   const { data: created, error: insertError } = await supabase
     .from('businesses')
-    .insert({ ...payload, created_by: user.id })
+    .insert({ ...payload, created_by: user.id } as BusinessInsert)
     .select('id')
     .single<Pick<Business, 'id'>>()
 

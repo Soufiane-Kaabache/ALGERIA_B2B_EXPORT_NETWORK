@@ -2,10 +2,37 @@ import { toDateTime } from '@/utils/helpers';
 import { stripe } from '@/utils/stripe/config';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
-import type { Database, Tables, TablesInsert } from 'types_db';
+import type { Database } from 'types_db';
 
-type Product = Tables<'products'>;
-type Price = Tables<'prices'>;
+// ⚠️ STATUT : ce fichier vient du starter Stripe d'origine. Les tables
+// `products`, `prices`, `customers` et les colonnes `users.billing_address` /
+// `users.payment_method` référencées ici ne correspondent plus à ton schéma
+// Supabase actuel (catalogue B2B avec `businesses`, `subscriptions` adaptées).
+// Le code ci-dessous compile, mais la logique métier doit être reconstruite
+// pour ton vrai modèle (plan/amount_paid/payment_method sur `subscriptions`,
+// liée à `business_id`, pas `user_id`/`price_id`) avant d'être branchée en
+// production. Considère ce fichier comme un point de départ à retravailler.
+
+type Product = {
+  id: string;
+  active: boolean;
+  name: string;
+  description: string | null;
+  image: string | null;
+  metadata: Record<string, unknown> | null;
+};
+
+type Price = {
+  id: string;
+  product_id: string;
+  active: boolean;
+  currency: string;
+  type: string;
+  unit_amount: number | null;
+  interval: string | null;
+  interval_count: number | null;
+  trial_period_days: number | null;
+};
 
 // Change to control trial period length
 const TRIAL_PERIOD_DAYS = 0;
@@ -27,7 +54,7 @@ const upsertProductRecord = async (product: Stripe.Product) => {
     metadata: product.metadata
   };
 
-  const { error: upsertError } = await supabaseAdmin
+  const { error: upsertError } = await (supabaseAdmin as any)
     .from('products')
     .upsert([productData]);
   if (upsertError)
@@ -52,7 +79,7 @@ const upsertPriceRecord = async (
     trial_period_days: price.recurring?.trial_period_days ?? TRIAL_PERIOD_DAYS
   };
 
-  const { error: upsertError } = await supabaseAdmin
+  const { error: upsertError } = await (supabaseAdmin as any)
     .from('prices')
     .upsert([priceData]);
 
@@ -74,7 +101,7 @@ const upsertPriceRecord = async (
 };
 
 const deleteProductRecord = async (product: Stripe.Product) => {
-  const { error: deletionError } = await supabaseAdmin
+  const { error: deletionError } = await (supabaseAdmin as any)
     .from('products')
     .delete()
     .eq('id', product.id);
@@ -84,7 +111,7 @@ const deleteProductRecord = async (product: Stripe.Product) => {
 };
 
 const deletePriceRecord = async (price: Stripe.Price) => {
-  const { error: deletionError } = await supabaseAdmin
+  const { error: deletionError } = await (supabaseAdmin as any)
     .from('prices')
     .delete()
     .eq('id', price.id);
@@ -93,7 +120,7 @@ const deletePriceRecord = async (price: Stripe.Price) => {
 };
 
 const upsertCustomerToSupabase = async (uuid: string, customerId: string) => {
-  const { error: upsertError } = await supabaseAdmin
+  const { error: upsertError } = await (supabaseAdmin as any)
     .from('customers')
     .upsert([{ id: uuid, stripe_customer_id: customerId }]);
 
@@ -120,7 +147,7 @@ const createOrRetrieveCustomer = async ({
 }) => {
   // Check if the customer already exists in Supabase
   const { data: existingSupabaseCustomer, error: queryError } =
-    await supabaseAdmin
+    await (supabaseAdmin as any)
       .from('customers')
       .select('*')
       .eq('id', uuid)
@@ -153,7 +180,7 @@ const createOrRetrieveCustomer = async ({
   if (existingSupabaseCustomer && stripeCustomerId) {
     // If Supabase has a record but doesn't match Stripe, update Supabase record
     if (existingSupabaseCustomer.stripe_customer_id !== stripeCustomerId) {
-      const { error: updateError } = await supabaseAdmin
+      const { error: updateError } = await (supabaseAdmin as any)
         .from('customers')
         .update({ stripe_customer_id: stripeCustomerId })
         .eq('id', uuid);
@@ -198,11 +225,11 @@ const copyBillingDetailsToCustomer = async (
   if (!name || !phone || !address) return;
   //@ts-ignore
   await stripe.customers.update(customer, { name, phone, address });
-  const { error: updateError } = await supabaseAdmin
+  const { error: updateError } = await (supabaseAdmin as any)
     .from('users')
     .update({
       billing_address: { ...address },
-      payment_method: { ...payment_method[payment_method.type] }
+      payment_method: { ...(payment_method as any)[payment_method.type] }
     })
     .eq('id', uuid);
   if (updateError) throw new Error(`Customer update failed: ${updateError.message}`);
@@ -214,7 +241,7 @@ const manageSubscriptionStatusChange = async (
   createAction = false
 ) => {
   // Get customer's UUID from mapping table.
-  const { data: customerData, error: noCustomerError } = await supabaseAdmin
+  const { data: customerData, error: noCustomerError } = await (supabaseAdmin as any)
     .from('customers')
     .select('id')
     .eq('stripe_customer_id', customerId)
@@ -228,14 +255,17 @@ const manageSubscriptionStatusChange = async (
   const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
     expand: ['default_payment_method']
   });
-  // Upsert the latest status of the subscription object.
-  const subscriptionData: TablesInsert<'subscriptions'> = {
+
+  // ⚠️ Ce payload correspond au modèle Stripe SaaS d'origine
+  // (user_id, price_id, quantity...) — à adapter à ta vraie table
+  // `subscriptions` (business_id, plan, amount_paid, payment_method)
+  // avant utilisation réelle.
+  const subscriptionData = {
     id: subscription.id,
     user_id: uuid,
     metadata: subscription.metadata,
     status: subscription.status,
     price_id: subscription.items.data[0].price.id,
-    //TODO check quantity on subscription
     // @ts-ignore
     quantity: subscription.quantity,
     cancel_at_period_end: subscription.cancel_at_period_end,
@@ -263,7 +293,7 @@ const manageSubscriptionStatusChange = async (
       : null
   };
 
-  const { error: upsertError } = await supabaseAdmin
+  const { error: upsertError } = await (supabaseAdmin as any)
     .from('subscriptions')
     .upsert([subscriptionData]);
   if (upsertError)
