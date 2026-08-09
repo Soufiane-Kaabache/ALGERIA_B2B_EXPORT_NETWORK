@@ -1,25 +1,19 @@
 'use server'
 
 import { createClient } from '@/utils/supabase/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ZodError } from 'zod'
 import type { Database } from '@/types_db'
 import { businessDraftSchema, businessSubmitSchema } from './schemas'
+import type { ActionState } from './types'
 
-type Business = Database['public']['Tables']['businesses']['Row']
 type BusinessInsert = Database['public']['Tables']['businesses']['Insert']
 type BusinessUpdate = Database['public']['Tables']['businesses']['Update']
-type UserProfile = Database['public']['Tables']['user_profiles']['Row']
 type SupplierDocumentInsert = Database['public']['Tables']['supplier_documents']['Insert']
+type UserProfileBusinessId = { business_id: string | null }
+type SupabasePublicClient = SupabaseClient<Database>
 
-export type ActionState = {
-  success?: boolean
-  error?: string
-  message?: string
-  fieldErrors?: Record<string, string>
-  businessId?: string
-}
-
-export const initialState: ActionState = {}
+type DbResponse<T> = { data: T | null; error: { code?: string | null; message: string } | null }
 
 type DbError = { code?: string | null; message: string }
 
@@ -57,7 +51,7 @@ function dbError(error: DbError): ActionState {
 // BROUILLON
 // ---------------------------------------------------------------------------
 export async function saveDraft(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const supabase = createClient()
+  const supabase = createClient() as SupabasePublicClient
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Session expirée. Veuillez vous reconnecter.' }
 
@@ -65,12 +59,11 @@ export async function saveDraft(_prev: ActionState, formData: FormData): Promise
   if (!parsed.success) return zodErrors(parsed.error)
   const d = parsed.data
 
-  const { data: profile, error: profileError } = await supabase
+  const { data: profile, error: profileError } = (await supabase
     .from('user_profiles')
     .select('business_id')
     .eq('id', user.id)
-    .maybeSingle<{ business_id: string | null }>()
-
+    .maybeSingle()) as { data: UserProfileBusinessId | null; error: DbError | null }
   if (profileError) return dbError(profileError)
 
   if (!profile) {
@@ -101,19 +94,19 @@ export async function saveDraft(_prev: ActionState, formData: FormData): Promise
       .update(payload)
       .eq('id', profile.business_id)
       .select('id')
-      .maybeSingle<Pick<Business, 'id'>>()
-
+      .maybeSingle()
     if (error) return dbError(error)
     if (!updated) return { success: false, error: 'Fiche introuvable ou plus modifiable.' }
     return { success: true, message: 'Brouillon enregistré.', businessId: updated.id }
   }
 
+  const insertPayload = { ...payload, created_by: user.id } as BusinessInsert
+
   const { data: created, error: insertError } = await supabase
     .from('businesses')
-    .insert({ ...payload, created_by: user.id } as BusinessInsert)
+    .insert(insertPayload)
     .select('id')
-    .single<Pick<Business, 'id'>>()
-
+    .single()
   if (insertError) return dbError(insertError)
 
   if (!profile) {
@@ -152,21 +145,20 @@ export async function uploadNRC(_prev: ActionState, formData: FormData): Promise
     return { success: false, error: 'Formats acceptés : PDF, JPG, PNG.' }
   }
 
-  const { data: profile, error: profileError } = await supabase
+  const profileResult = await supabase
     .from('user_profiles')
     .select('business_id')
     .eq('id', user.id)
-    .maybeSingle<{ business_id: string | null }>()
-
-  if (profileError) return dbError(profileError)
+    .maybeSingle()
+  const profile = profileResult.data as UserProfileBusinessId | null
+  if (profileResult.error) return dbError(profileResult.error)
   if (!profile?.business_id) return { success: false, error: "Enregistrez d'abord votre brouillon." }
 
   const { data: business, error: businessError } = await supabase
     .from('businesses')
     .select('status')
     .eq('id', profile.business_id)
-    .maybeSingle<Pick<Business, 'status'>>()
-
+    .maybeSingle()
   if (businessError) return dbError(businessError)
   if (!business || !['draft', 'rejected'].includes(business.status)) {
     return { success: false, error: "La fiche n'est plus modifiable." }
@@ -176,7 +168,6 @@ export async function uploadNRC(_prev: ActionState, formData: FormData): Promise
   const { error: storageError } = await supabase.storage
     .from('supplier-docs')
     .upload(storagePath, file, { upsert: true, contentType: file.type })
-
   if (storageError) return { success: false, error: `Échec upload : ${storageError.message}` }
 
   await supabase
@@ -208,13 +199,13 @@ export async function submitForReview(_prev: ActionState, formData: FormData): P
   if (!parsed.success) return zodErrors(parsed.error)
   const d = parsed.data
 
-  const { data: profile, error: profileError } = await supabase
+  const profileResult = await supabase
     .from('user_profiles')
     .select('business_id')
     .eq('id', user.id)
-    .maybeSingle<{ business_id: string | null }>()
-
-  if (profileError) return dbError(profileError)
+    .maybeSingle()
+  const profile = profileResult.data as UserProfileBusinessId | null
+  if (profileResult.error) return dbError(profileResult.error)
   if (!profile?.business_id) return { success: false, error: "Enregistrez d'abord votre brouillon." }
 
   const payload: BusinessUpdate = {
@@ -235,7 +226,7 @@ export async function submitForReview(_prev: ActionState, formData: FormData): P
     .update(payload)
     .eq('id', profile.business_id)
     .select('id, status')
-    .maybeSingle<Pick<Business, 'id' | 'status'>>()
+    .maybeSingle()
 
   if (error) {
     if (error.code === '42501' || /row-level security/i.test(error.message)) {
