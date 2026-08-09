@@ -1,7 +1,7 @@
 -- Create supplier_documents table if it doesn't exist
 CREATE TABLE IF NOT EXISTS supplier_documents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  supplier_id UUID NOT NULL REFERENCES public.suppliers(id) ON DELETE CASCADE,
   document_type VARCHAR(50) NOT NULL,
   file_path VARCHAR(500) NOT NULL,
   file_hash VARCHAR(64),
@@ -10,75 +10,69 @@ CREATE TABLE IF NOT EXISTS supplier_documents (
   is_verified BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(business_id, document_type)
+  UNIQUE(supplier_id, document_type)
 );
 
 -- Add index for faster queries
-CREATE INDEX IF NOT EXISTS idx_supplier_documents_business_id 
-  ON supplier_documents(business_id);
+CREATE INDEX IF NOT EXISTS idx_supplier_documents_supplier_id 
+  ON supplier_documents(supplier_id);
 
--- Add security and integrity fields to user_profiles table
-ALTER TABLE user_profiles 
+-- Add security fields to suppliers table
+ALTER TABLE public.suppliers
+ADD COLUMN IF NOT EXISTS nif VARCHAR(20),
+ADD COLUMN IF NOT EXISTS nrc VARCHAR(20),
 ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'supplier',
 ADD COLUMN IF NOT EXISTS permissions JSONB DEFAULT '{}';
 
 -- Enable Row Level Security
-ALTER TABLE businesses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.suppliers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE supplier_documents ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
 
--- ===== BUSINESSES TABLE POLICIES =====
--- Users can only view/update their own business
-CREATE POLICY IF NOT EXISTS "Users can view their own business"
-  ON businesses FOR SELECT
-  USING (
-    created_by = auth.uid()
-    OR auth.uid() IN (
-      SELECT id FROM user_profiles WHERE business_id = businesses.id
-    )
-  );
+-- ===== SUPPLIERS TABLE POLICIES =====
+-- Users can only view/update their own supplier profile
+CREATE POLICY IF NOT EXISTS "Users can view their own supplier"
+  ON public.suppliers FOR SELECT
+  USING (user_id = auth.uid() OR auth.uid() IN (
+    SELECT user_id FROM public.suppliers WHERE role = 'admin'
+  ));
 
-CREATE POLICY IF NOT EXISTS "Users can update their own business"
-  ON businesses FOR UPDATE
-  USING (created_by = auth.uid())
-  WITH CHECK (created_by = auth.uid());
+CREATE POLICY IF NOT EXISTS "Users can update their own supplier"
+  ON public.suppliers FOR UPDATE
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
 
-CREATE POLICY IF NOT EXISTS "Users can insert their own business"
-  ON businesses FOR INSERT
-  WITH CHECK (created_by = auth.uid());
-
--- Admins can view all businesses
-CREATE POLICY IF NOT EXISTS "Admins can view all businesses"
-  ON businesses FOR SELECT
+-- Admins can view all suppliers
+CREATE POLICY IF NOT EXISTS "Admins can view all suppliers"
+  ON public.suppliers FOR SELECT
   USING (
     auth.uid() IN (
-      SELECT id FROM user_profiles WHERE role = 'admin'
+      SELECT user_id FROM public.suppliers WHERE role = 'admin'
     )
   );
 
 -- ===== SUPPLIER_DOCUMENTS TABLE POLICIES =====
--- Users can view/insert documents for their business
+-- Users can view/insert documents for their supplier profile
 CREATE POLICY IF NOT EXISTS "Users can view their documents"
   ON supplier_documents FOR SELECT
   USING (
-    business_id IN (
-      SELECT business_id FROM user_profiles WHERE id = auth.uid()
+    supplier_id IN (
+      SELECT id FROM public.suppliers WHERE user_id = auth.uid()
     )
   );
 
-CREATE POLICY IF NOT EXISTS "Users can insert documents for their business"
+CREATE POLICY IF NOT EXISTS "Users can insert documents for their supplier"
   ON supplier_documents FOR INSERT
   WITH CHECK (
-    business_id IN (
-      SELECT business_id FROM user_profiles WHERE id = auth.uid()
+    supplier_id IN (
+      SELECT id FROM public.suppliers WHERE user_id = auth.uid()
     )
   );
 
 CREATE POLICY IF NOT EXISTS "Users can delete their documents"
   ON supplier_documents FOR DELETE
   USING (
-    business_id IN (
-      SELECT business_id FROM user_profiles WHERE id = auth.uid()
+    supplier_id IN (
+      SELECT id FROM public.suppliers WHERE user_id = auth.uid()
     )
   );
 
@@ -87,81 +81,106 @@ CREATE POLICY IF NOT EXISTS "Admins can view all documents"
   ON supplier_documents FOR SELECT
   USING (
     auth.uid() IN (
-      SELECT id FROM user_profiles WHERE role = 'admin'
+      SELECT user_id FROM public.suppliers WHERE role = 'admin'
     )
   );
 
--- ===== USER_PROFILES TABLE POLICIES =====
--- Users can view their own profile
-CREATE POLICY IF NOT EXISTS "Users can view their own profile"
-  ON user_profiles FOR SELECT
-  USING (id = auth.uid());
-
--- Users can update their own profile
-CREATE POLICY IF NOT EXISTS "Users can update their own profile"
-  ON user_profiles FOR UPDATE
-  USING (id = auth.uid())
-  WITH CHECK (id = auth.uid());
-
--- Admins can view all profiles
-CREATE POLICY IF NOT EXISTS "Admins can view all profiles"
-  ON user_profiles FOR SELECT
-  USING (
-    auth.uid() IN (
-      SELECT id FROM user_profiles WHERE role = 'admin'
-    )
-  );
-
--- ===== CREATE RPC FUNCTION FOR ATOMIC TRANSACTIONS =====
-CREATE OR REPLACE FUNCTION create_business_with_profile(
-  payload_json JSONB,
-  user_id UUID
+-- ===== CREATE RPC FUNCTION FOR ATOMIC DOCUMENT UPLOAD =====
+CREATE OR REPLACE FUNCTION upload_supplier_document(
+  p_supplier_id UUID,
+  p_document_type VARCHAR,
+  p_file_path VARCHAR,
+  p_file_hash VARCHAR,
+  p_file_size INTEGER
 ) RETURNS JSONB AS $$
 DECLARE
-  business_id UUID;
+  doc_id UUID;
 BEGIN
-  -- Insert business
-  INSERT INTO businesses (
-    trade_name,
-    legal_name,
-    legal_form,
-    nif,
-    nrc,
-    wilaya_code,
-    address,
-    phone,
-    email,
-    status,
-    created_by
-  ) VALUES (
-    payload_json->>'trade_name',
-    payload_json->>'legal_name',
-    payload_json->>'legal_form',
-    NULLIF(payload_json->>'nif', ''),
-    NULLIF(payload_json->>'nrc', ''),
-    payload_json->>'wilaya_code',
-    NULLIF(payload_json->>'address', ''),
-    NULLIF(payload_json->>'phone', ''),
-    NULLIF(payload_json->>'email', ''),
-    'draft',
-    user_id
-  ) RETURNING id INTO business_id;
-
-  -- Check if profile exists
-  IF EXISTS (SELECT 1 FROM user_profiles WHERE id = user_id) THEN
-    -- Update existing profile
-    UPDATE user_profiles SET business_id = business_id WHERE id = user_id;
-  ELSE
-    -- Create new profile
-    INSERT INTO user_profiles (id, business_id, role)
-    VALUES (user_id, business_id, 'supplier');
+  -- Check if user owns this supplier
+  IF NOT EXISTS (
+    SELECT 1 FROM public.suppliers 
+    WHERE id = p_supplier_id AND user_id = auth.uid()
+  ) THEN
+    RAISE EXCEPTION 'Unauthorized: You do not own this supplier profile';
   END IF;
 
-  RETURN jsonb_build_object('id', business_id);
+  -- Insert or update document
+  INSERT INTO supplier_documents (
+    supplier_id,
+    document_type,
+    file_path,
+    file_hash,
+    file_size,
+    is_verified
+  ) VALUES (
+    p_supplier_id,
+    p_document_type,
+    p_file_path,
+    p_file_hash,
+    p_file_size,
+    TRUE
+  )
+  ON CONFLICT (supplier_id, document_type)
+  DO UPDATE SET
+    file_path = EXCLUDED.file_path,
+    file_hash = EXCLUDED.file_hash,
+    file_size = EXCLUDED.file_size,
+    uploaded_at = CURRENT_TIMESTAMP,
+    is_verified = TRUE
+  RETURNING id INTO doc_id;
+
+  RETURN jsonb_build_object(
+    'id', doc_id,
+    'supplier_id', p_supplier_id,
+    'document_type', p_document_type,
+    'file_hash', p_file_hash,
+    'file_size', p_file_size
+  );
 EXCEPTION WHEN OTHERS THEN
   RAISE EXCEPTION 'Transaction failed: %', SQLERRM;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Grant permission to execute the function
-GRANT EXECUTE ON FUNCTION create_business_with_profile(JSONB, UUID) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION upload_supplier_document(UUID, VARCHAR, VARCHAR, VARCHAR, INTEGER) TO anon, authenticated;
+
+-- ===== CREATE RPC FUNCTION FOR UPDATING SUPPLIER INFO =====
+CREATE OR REPLACE FUNCTION update_supplier_profile(
+  p_supplier_id UUID,
+  p_nif VARCHAR DEFAULT NULL,
+  p_nrc VARCHAR DEFAULT NULL,
+  p_company_name VARCHAR DEFAULT NULL,
+  p_email VARCHAR DEFAULT NULL,
+  p_phone VARCHAR DEFAULT NULL
+) RETURNS JSONB AS $$
+BEGIN
+  -- Check if user owns this supplier
+  IF NOT EXISTS (
+    SELECT 1 FROM public.suppliers 
+    WHERE id = p_supplier_id AND user_id = auth.uid()
+  ) THEN
+    RAISE EXCEPTION 'Unauthorized: You do not own this supplier profile';
+  END IF;
+
+  -- Update supplier profile
+  UPDATE public.suppliers SET
+    nif = COALESCE(p_nif, nif),
+    nrc = COALESCE(p_nrc, nrc),
+    company_name = COALESCE(p_company_name, company_name),
+    email = COALESCE(p_email, email),
+    phone = COALESCE(p_phone, phone),
+    updated_at = CURRENT_TIMESTAMP
+  WHERE id = p_supplier_id;
+
+  RETURN jsonb_build_object(
+    'id', p_supplier_id,
+    'success', TRUE,
+    'message', 'Supplier profile updated successfully'
+  );
+EXCEPTION WHEN OTHERS THEN
+  RAISE EXCEPTION 'Transaction failed: %', SQLERRM;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant permission to execute the function
+GRANT EXECUTE ON FUNCTION update_supplier_profile(UUID, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR) TO anon, authenticated;
