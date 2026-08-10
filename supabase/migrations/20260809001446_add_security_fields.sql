@@ -29,20 +29,22 @@ ALTER TABLE public.suppliers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE supplier_documents ENABLE ROW LEVEL SECURITY;
 
 -- ===== SUPPLIERS TABLE POLICIES =====
--- Users can only view/update their own supplier profile
-CREATE POLICY IF NOT EXISTS "Users can view their own supplier"
+DROP POLICY IF EXISTS "Users can view their own supplier" ON public.suppliers;
+CREATE POLICY "Users can view their own supplier"
   ON public.suppliers FOR SELECT
   USING (user_id = auth.uid() OR auth.uid() IN (
     SELECT user_id FROM public.suppliers WHERE role = 'admin'
   ));
 
-CREATE POLICY IF NOT EXISTS "Users can update their own supplier"
+DROP POLICY IF EXISTS "Users can update their own supplier" ON public.suppliers;
+CREATE POLICY "Users can update their own supplier"
   ON public.suppliers FOR UPDATE
   USING (user_id = auth.uid())
   WITH CHECK (user_id = auth.uid());
 
 -- Admins can view all suppliers
-CREATE POLICY IF NOT EXISTS "Admins can view all suppliers"
+DROP POLICY IF EXISTS "Admins can view all suppliers" ON public.suppliers;
+CREATE POLICY "Admins can view all suppliers"
   ON public.suppliers FOR SELECT
   USING (
     auth.uid() IN (
@@ -51,8 +53,8 @@ CREATE POLICY IF NOT EXISTS "Admins can view all suppliers"
   );
 
 -- ===== SUPPLIER_DOCUMENTS TABLE POLICIES =====
--- Users can view/insert documents for their supplier profile
-CREATE POLICY IF NOT EXISTS "Users can view their documents"
+DROP POLICY IF EXISTS "Users can view their documents" ON supplier_documents;
+CREATE POLICY "Users can view their documents"
   ON supplier_documents FOR SELECT
   USING (
     supplier_id IN (
@@ -60,7 +62,8 @@ CREATE POLICY IF NOT EXISTS "Users can view their documents"
     )
   );
 
-CREATE POLICY IF NOT EXISTS "Users can insert documents for their supplier"
+DROP POLICY IF EXISTS "Users can insert documents for their supplier" ON supplier_documents;
+CREATE POLICY "Users can insert documents for their supplier"
   ON supplier_documents FOR INSERT
   WITH CHECK (
     supplier_id IN (
@@ -68,7 +71,8 @@ CREATE POLICY IF NOT EXISTS "Users can insert documents for their supplier"
     )
   );
 
-CREATE POLICY IF NOT EXISTS "Users can delete their documents"
+DROP POLICY IF EXISTS "Users can delete their documents" ON supplier_documents;
+CREATE POLICY "Users can delete their documents"
   ON supplier_documents FOR DELETE
   USING (
     supplier_id IN (
@@ -77,7 +81,8 @@ CREATE POLICY IF NOT EXISTS "Users can delete their documents"
   );
 
 -- Admins can view all documents
-CREATE POLICY IF NOT EXISTS "Admins can view all documents"
+DROP POLICY IF EXISTS "Admins can view all documents" ON supplier_documents;
+CREATE POLICY "Admins can view all documents"
   ON supplier_documents FOR SELECT
   USING (
     auth.uid() IN (
@@ -96,7 +101,6 @@ CREATE OR REPLACE FUNCTION upload_supplier_document(
 DECLARE
   doc_id UUID;
 BEGIN
-  -- Check if user owns this supplier
   IF NOT EXISTS (
     SELECT 1 FROM public.suppliers 
     WHERE id = p_supplier_id AND user_id = auth.uid()
@@ -104,7 +108,6 @@ BEGIN
     RAISE EXCEPTION 'Unauthorized: You do not own this supplier profile';
   END IF;
 
-  -- Insert or update document
   INSERT INTO supplier_documents (
     supplier_id,
     document_type,
@@ -141,7 +144,6 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Grant permission to execute the function
 GRANT EXECUTE ON FUNCTION upload_supplier_document(UUID, VARCHAR, VARCHAR, VARCHAR, INTEGER) TO anon, authenticated;
 
 -- ===== CREATE RPC FUNCTION FOR UPDATING SUPPLIER INFO =====
@@ -154,7 +156,6 @@ CREATE OR REPLACE FUNCTION update_supplier_profile(
   p_phone VARCHAR DEFAULT NULL
 ) RETURNS JSONB AS $$
 BEGIN
-  -- Check if user owns this supplier
   IF NOT EXISTS (
     SELECT 1 FROM public.suppliers 
     WHERE id = p_supplier_id AND user_id = auth.uid()
@@ -162,7 +163,6 @@ BEGIN
     RAISE EXCEPTION 'Unauthorized: You do not own this supplier profile';
   END IF;
 
-  -- Update supplier profile
   UPDATE public.suppliers SET
     nif = COALESCE(p_nif, nif),
     nrc = COALESCE(p_nrc, nrc),
@@ -182,5 +182,4 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Grant permission to execute the function
 GRANT EXECUTE ON FUNCTION update_supplier_profile(UUID, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR) TO anon, authenticated;

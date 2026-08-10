@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS public.wilayas (
 
 ALTER TABLE public.wilayas ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "wilayas_public_read" ON public.wilayas;
 CREATE POLICY "wilayas_public_read" ON public.wilayas
   FOR SELECT USING (true);
 
@@ -85,4 +86,7 @@ INSERT INTO public.wilayas (code, name_fr, name_en, name_ar) VALUES
 ('67', 'Messaad', 'Messaad', 'مسعد'),
 ('68', 'Aïn Oussera', 'Ain Oussera', 'عين وسارة'),
 ('69', 'El Abiodh Sidi Cheikh', 'El Abiodh Sidi Cheikh', 'الأبيض سيدي الشيخ')
-ON CONFLICT (code) DO NOTHING;
+ON CONFLICT (code) DO UPDATE SET
+  name_fr = EXCLUDED.name_fr,
+  name_en = EXCLUDED.name_en,
+  name_ar = EXCLUDED.name_ar;
