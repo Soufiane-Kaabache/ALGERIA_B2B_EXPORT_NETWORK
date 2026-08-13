@@ -22,16 +22,9 @@ export const getSubscription = cache(async (supabase: SupabasePublicClient) => {
 });
 
 export const getUserDetails = cache(async (supabase: SupabasePublicClient) => {
-  const { data: profile } = await supabase
-    .from('user_profiles')
-    .select('first_name, last_name')
-    .maybeSingle();
-
-  if (!profile) {
-    return null;
-  }
-
-  return {
-    full_name: `${profile.first_name} ${profile.last_name}`.trim()
-  };
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const meta = user.user_metadata || {};
+  const full = [meta.first_name, meta.last_name].filter(Boolean).join(' ').trim();
+  return { full_name: full || user.email || '' };
 });

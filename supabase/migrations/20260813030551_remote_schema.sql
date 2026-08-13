@@ -11,6 +11,7 @@ drop policy "orders_update" on "public"."orders";
 drop policy "payments_select" on "public"."payments";
 
 drop policy "qr_update" on "public"."quote_requests";
+drop policy "qr_select" on "public"."quote_requests";
 
 drop policy "quotes_insert" on "public"."quotes";
 
@@ -21,6 +22,29 @@ drop policy "quotes_update" on "public"."quotes";
 drop policy "reviews_insert" on "public"."reviews";
 
 drop policy "reviews_select" on "public"."reviews";
+drop policy "qr_delete" on "public"."quote_requests";
+drop policy "qr_insert" on "public"."quote_requests";
+drop policy "quotes_delete" on "public"."quotes";
+drop policy "orders_delete" on "public"."orders";
+drop policy "items_select" on "public"."order_items";
+drop policy "docs_delete" on "public"."documents";
+drop policy "docs_insert" on "public"."documents";
+drop policy "docs_select" on "public"."documents";
+drop policy "docs_update" on "public"."documents";
+drop policy "conv_insert" on "public"."conversations";
+drop policy "conv_select" on "public"."conversations";
+drop policy "part_insert" on "public"."conversation_participants";
+drop policy "part_select" on "public"."conversation_participants";
+drop policy "msg_insert" on "public"."chat_messages";
+drop policy "msg_select" on "public"."chat_messages";
+drop policy "notifications_insert" on "public"."notifications";
+drop policy "notifications_select" on "public"."notifications";
+drop policy "notifications_update" on "public"."notifications";
+drop policy "payouts_admin_only" on "public"."payouts";
+drop policy "products_manage" on "public"."products_catalog";
+drop policy "products_public_read" on "public"."products_catalog";
+drop policy "rates_public_read" on "public"."exchange_rates";
+drop policy "wilayas_public_read" on "public"."wilayas";
 
 alter type "public"."app_role" rename to "app_role__old_version_to_be_dropped";
 

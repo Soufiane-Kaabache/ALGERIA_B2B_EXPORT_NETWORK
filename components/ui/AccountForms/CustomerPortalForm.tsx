@@ -25,7 +25,7 @@ export default function CustomerPortalForm({ subscription }: Props) {
       style: 'currency',
       currency: 'DZD',
       minimumFractionDigits: 0
-    }).format(subscription.amount_paid || 0);
+    }).format(subscription.amount_eur || 0);
 
   const handleStripePortalRequest = async () => {
     setIsSubmitting(true);
